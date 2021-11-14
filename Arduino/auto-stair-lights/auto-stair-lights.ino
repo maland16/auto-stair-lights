@@ -8,28 +8,34 @@
 /**
  * @brief Configurable Constants
  */
-#define NUM_PIXLES_PER_STAIR (1)
-#define NUM_STAIRS (7)
-// This defines the intensity a given stair will get to before
-// the next stair begins to fade up (1-255)
-#define SEQUENTIAL_FADE_THRESHOLD (20)
+#define NUM_PIXLES_PER_STAIR (7)
+#define NUM_STAIRS (3)
+// This defines the brightness a given stair will get to before
+// the next stair begins to fade while fading up (1-255)
+#define SEQUENTIAL_FADE_UP_THRESHOLD (20)
+// This defines the brightness a given stair will get to before
+// the next stair begins to fade while fading down (1-255)
+#define SEQUENTIAL_FADE_DOWN_THRESHOLD (235)
 
 /**
  * @brief Non-configurable constants
  */
 #define NUM_PIXELS (NUM_PIXLES_PER_STAIR * NUM_STAIRS)
 #define PIR_ADC_CUTOFF (618 / 2) // Found empirically
-#define MAX_BRIGHTNESS (200)
+#define MIN_BRIGHTNESS (0)
+#define MAX_BRIGHTNESS (255)
 
 // Global variables
 Adafruit_NeoPixel pixels(NUM_PIXELS, NEOPXL_PIN, NEO_GRB + NEO_KHZ800);
 bool lower_pir_motion = false;
 bool upper_pir_motion = false;
+bool fading_up_stairs = true;
+bool fading_up_brightness = true;
 uint32_t stair_target_color[NUM_STAIRS];
 uint8_t stair_brightness[NUM_STAIRS];
 
 // Forward declarations
-void fadeUpStairs(uint32_t c);
+/* void startFade();
 void setStair(uint32_t c, uint8_t stair);
 void incrementStair(uint8_t stair);
 uint32_t scaleColor(uint32_t c, uint8_t brightness);
@@ -38,12 +44,12 @@ bool stairAtThreshold(uint8_t stair);
 bool stairValid(uint8_t stair);
 void pollPIR(void);
 void allOn(void);
-void allOff(void);
+void allOff(void);*/
 
 void setup()
 {
   Serial.begin(9600);
-
+  Serial.println("DEBUG: Initializing...");
   // Initialize target color & brightness of 0
   for (uint8_t i = 0; i < NUM_STAIRS; i++)
   {
@@ -69,7 +75,11 @@ void loop()
   {
     Serial.read();
   } // Flush the serial RX buffer
-  fadeUpStairs();
+
+  fading_up_stairs = true;
+  fading_up_brightness = true;
+
+  startFade();
 
   /*
   pollPIR(); // Poll the sensors
@@ -120,7 +130,7 @@ void loop()
 /**
  * @brief Fades up stairs
  */
-void fadeUpStairs()
+void startFade()
 {
   // The number of stairs that are done fading. Initialized to 0 because
   // when this function is first called we haven't faded anything yet
@@ -135,7 +145,8 @@ void fadeUpStairs()
     // Only loop over the stairs that are actively changing
     for (int i = stairs_complete; i <= stair_reached; i++)
     {
-      incrementStair(i);
+
+      tickStair(i);
 
       // If we are incrementing the last stair currently fading and we aren't at the final stair, check to see
       // if we are at the threshold to kick off the fade for the next stair
@@ -154,7 +165,7 @@ void fadeUpStairs()
         stairs_complete++;
       }
     }
-    delay(10);
+    delay(20);
 
     pixels.show();
   }
@@ -180,13 +191,20 @@ bool stairAtThreshold(uint8_t stair)
     return false;
   }
 
-  return stair_brightness[stair] == SEQUENTIAL_FADE_THRESHOLD;
+  if (fading_up_stairs)
+  {
+    return stair_brightness[stair] == SEQUENTIAL_FADE_UP_THRESHOLD;
+  }
+  else
+  {
+    return stair_brightness[stair] == SEQUENTIAL_FADE_DOWN_THRESHOLD;
+  }
 }
 
 /**
- * @brief Increment light level at specified stair
+ * @brief Increment or decrement light level at specified stair
  */
-void incrementStair(uint8_t stair)
+void tickStair(uint8_t stair)
 {
   if (!stairValid(stair))
   {
@@ -194,8 +212,18 @@ void incrementStair(uint8_t stair)
     return;
   }
 
-  // Increment then grab the brightness setting for this stair
-  uint8_t brightness = ++stair_brightness[stair];
+  uint8_t brightness = MAX_BRIGHTNESS;
+  // Modify then return stair brightness based on fade direction
+  if (fading_up_brightness)
+  {
+    // TODO: Bounds check?
+    brightness = ++stair_brightness[stair];
+  }
+  else
+  {
+    // TODO: Bounds check?
+    brightness = --stair_brightness[stair];
+  }
 
   // Grab the scaled stair color
   uint32_t c = scaleColor(stair_target_color[stair], brightness);
