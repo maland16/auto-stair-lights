@@ -15,7 +15,7 @@
 #define SEQUENTIAL_FADE_UP_THRESHOLD (20)
 // This defines the brightness a given stair will get to before
 // the next stair begins to fade while fading down (1-255)
-#define SEQUENTIAL_FADE_DOWN_THRESHOLD (235)
+#define SEQUENTIAL_FADE_DOWN_THRESHOLD (120)
 
 /**
  * @brief Non-configurable constants
@@ -23,7 +23,7 @@
 #define NUM_PIXELS (NUM_PIXLES_PER_STAIR * NUM_STAIRS)
 #define PIR_ADC_CUTOFF (618 / 2) // Found empirically
 #define MIN_BRIGHTNESS (0)
-#define MAX_BRIGHTNESS (255)
+#define MAX_BRIGHTNESS (150)
 
 // Global variables
 Adafruit_NeoPixel pixels(NUM_PIXELS, NEOPXL_PIN, NEO_GRB + NEO_KHZ800);
@@ -34,18 +34,6 @@ bool fading_up_brightness = true;
 uint32_t stair_target_color[NUM_STAIRS];
 uint8_t stair_brightness[NUM_STAIRS];
 
-// Forward declarations
-/* void startFade();
-void setStair(uint32_t c, uint8_t stair);
-void incrementStair(uint8_t stair);
-uint32_t scaleColor(uint32_t c, uint8_t brightness);
-bool doneFadingStair(uint8_t stair);
-bool stairAtThreshold(uint8_t stair);
-bool stairValid(uint8_t stair);
-void pollPIR(void);
-void allOn(void);
-void allOff(void);*/
-
 void setup()
 {
   Serial.begin(9600);
@@ -53,12 +41,12 @@ void setup()
   // Initialize target color & brightness of 0
   for (uint8_t i = 0; i < NUM_STAIRS; i++)
   {
-    stair_target_color[i] = pixels.Color(255, 255, 255);
+    stair_target_color[i] = pixels.Color(MAX_BRIGHTNESS, MAX_BRIGHTNESS, MAX_BRIGHTNESS);
     stair_brightness[i] = 0;
   }
-  stair_target_color[0] = pixels.Color(255, 10, 10);
-  stair_target_color[1] = pixels.Color(10, 255, 10);
-  stair_target_color[2] = pixels.Color(10, 10, 255);
+  stair_target_color[0] = pixels.Color(MAX_BRIGHTNESS, 10, 10);
+  stair_target_color[1] = pixels.Color(10, MAX_BRIGHTNESS, 10);
+  stair_target_color[2] = pixels.Color(10, 10, MAX_BRIGHTNESS);
   // Set all the pixels to off
   pixels.begin();
   pixels.show();
@@ -78,6 +66,49 @@ void loop()
 
   fading_up_stairs = true;
   fading_up_brightness = true;
+
+  startFade();
+
+  Serial.println("Waiting for 2nd fade start");
+  while (Serial.available() == 0)
+  {
+    delay(100);
+  }; // Wait for input
+  while (Serial.available())
+  {
+    Serial.read();
+  } // Flush the serial RX buffer
+
+  fading_up_stairs = true;
+  fading_up_brightness = false;
+
+  startFade();
+  while (Serial.available() == 0)
+  {
+    delay(100);
+  }; // Wait for input
+  while (Serial.available())
+  {
+    Serial.read();
+  } // Flush the serial RX buffer
+
+  fading_up_stairs = false;
+  fading_up_brightness = true;
+
+  startFade();
+
+  Serial.println("Waiting for 2nd fade start");
+  while (Serial.available() == 0)
+  {
+    delay(100);
+  }; // Wait for input
+  while (Serial.available())
+  {
+    Serial.read();
+  } // Flush the serial RX buffer
+
+  fading_up_stairs = false;
+  fading_up_brightness = false;
 
   startFade();
 
@@ -145,6 +176,7 @@ void startFade()
     // Only loop over the stairs that are actively changing
     for (int i = stairs_complete; i <= stair_reached; i++)
     {
+      direction_based_stair = stair_based_on_direction(i);
 
       tickStair(i);
 
@@ -180,7 +212,14 @@ bool doneFadingStair(uint8_t stair)
     return false;
   }
 
-  return stair_brightness[stair] == MAX_BRIGHTNESS;
+  if (fading_up_brightness)
+  {
+    return stair_brightness[stair] == MAX_BRIGHTNESS;
+  }
+  else
+  {
+    return stair_brightness[stair] == MIN_BRIGHTNESS;
+  }
 }
 
 bool stairAtThreshold(uint8_t stair)
@@ -191,7 +230,7 @@ bool stairAtThreshold(uint8_t stair)
     return false;
   }
 
-  if (fading_up_stairs)
+  if (fading_up_brightness)
   {
     return stair_brightness[stair] == SEQUENTIAL_FADE_UP_THRESHOLD;
   }
@@ -254,6 +293,22 @@ uint32_t scaleColor(uint32_t c, uint8_t brightness)
 bool stairValid(uint8_t stair)
 {
   return stair < NUM_STAIRS;
+}
+
+/**
+ * @brief Return the stair that should be fading based on the direction of the fade
+ * @details If fading up the stairs, returns the given stair. If fading down the stairs returns the inverse stair on the list
+ */
+uint8_t stair_based_on_direction(uint8_t stair)
+{
+  if (fading_up_stairs)
+  {
+    return stair;
+  }
+  else
+  {
+    NUM_STAIRS - stair;
+  }
 }
 
 /**
