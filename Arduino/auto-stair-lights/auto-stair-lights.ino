@@ -2,7 +2,7 @@
 
 // Pin defines
 #define NEOPXL_PIN 6     // Digital 6
-#define LOWER_PIR_PIN A5 // Analog 5
+#define LOWER_PIR_PIN A0 // Analog 5
 #define UPPER_PIR_PIN A4 // Analog 4
 
 /**
@@ -16,6 +16,12 @@
 // This defines the brightness a given stair will get to before
 // the next stair begins to fade while fading down (1-255)
 #define SEQUENTIAL_FADE_DOWN_THRESHOLD (120)
+// The delay between fade steps in MS. Used inside the loop in doFade()
+// This effectively changes the speed of the fading
+#define FADE_STEP_DELAY_MS (5)
+// Max brightness the pixels will fade to
+// CAN NOT be set below the fade up or fade down thresholds above
+#define MAX_BRIGHTNESS (150)
 
 /**
  * @brief Non-configurable constants
@@ -23,7 +29,6 @@
 #define NUM_PIXELS (NUM_PIXLES_PER_STAIR * NUM_STAIRS)
 #define PIR_ADC_CUTOFF (618 / 2) // Found empirically
 #define MIN_BRIGHTNESS (0)
-#define MAX_BRIGHTNESS (150)
 
 // Global variables
 Adafruit_NeoPixel pixels(NUM_PIXELS, NEOPXL_PIN, NEO_GRB + NEO_KHZ800);
@@ -55,75 +60,14 @@ void setup()
 
 void loop()
 {
-  while (Serial.available() == 0)
-  {
-    delay(100);
-  }; // Wait for input
-  while (Serial.available())
-  {
-    Serial.read();
-  } // Flush the serial RX buffer
-
-  fading_up_stairs = true;
-  fading_up_brightness = true;
-
-  startFade();
-
-  Serial.println("Waiting for 2nd fade start");
-  while (Serial.available() == 0)
-  {
-    delay(100);
-  }; // Wait for input
-  while (Serial.available())
-  {
-    Serial.read();
-  } // Flush the serial RX buffer
-
-  fading_up_stairs = true;
-  fading_up_brightness = false;
-
-  startFade();
-  while (Serial.available() == 0)
-  {
-    delay(100);
-  }; // Wait for input
-  while (Serial.available())
-  {
-    Serial.read();
-  } // Flush the serial RX buffer
-
-  fading_up_stairs = false;
-  fading_up_brightness = true;
-
-  startFade();
-
-  Serial.println("Waiting for 2nd fade start");
-  while (Serial.available() == 0)
-  {
-    delay(100);
-  }; // Wait for input
-  while (Serial.available())
-  {
-    Serial.read();
-  } // Flush the serial RX buffer
-
-  fading_up_stairs = false;
-  fading_up_brightness = false;
-
-  startFade();
-
-  /*
   pollPIR(); // Poll the sensors
 
   if (lower_pir_motion)
   {
-    for (int i = 0; i < 255; i++)
-    {
-      uint32_t white = pixels.Color(i, i, i);
-      pixels.fill(white, 0, NUM_PIXELS);
-      pixels.show();
-      delay(3);
-    }
+    fading_up_stairs = true;
+    fading_up_brightness = true;
+
+    startFade();
 
     while (lower_pir_motion)
     {
@@ -131,35 +75,36 @@ void loop()
       delay(100);
     }
 
-    allOn();
-  }
-  else
-  {
-    for (int i = 255; i >= 0; i--)
-    {
-      uint32_t white = pixels.Color(i, i, i);
-      pixels.fill(white, 0, NUM_PIXELS);
-      pixels.show();
-      delay(3);
-    }
+    fading_up_stairs = true;
+    fading_up_brightness = false;
 
-    while (!lower_pir_motion)
+    startFade();
+  }
+
+  if (upper_pir_motion)
+  {
+    fading_up_stairs = false;
+    fading_up_brightness = true;
+
+    startFade();
+
+    while (upper_pir_motion)
     {
       pollPIR();
       delay(100);
     }
 
-    allOff();
-  }*/
+    fading_up_stairs = false;
+    fading_up_brightness = false;
 
-  while (1)
-  {
-    delay(100);
+    startFade();
   }
+
+  delay(100);
 }
 
 /**
- * @brief Fades up stairs
+ * @brief Fades
  */
 void startFade()
 {
@@ -176,28 +121,29 @@ void startFade()
     // Only loop over the stairs that are actively changing
     for (int i = stairs_complete; i <= stair_reached; i++)
     {
-      direction_based_stair = stair_based_on_direction(i);
+      int8_t direction_based_stair = stairBasedOnDirection(i);
 
-      tickStair(i);
+      tickStair(direction_based_stair);
 
       // If we are incrementing the last stair currently fading and we aren't at the final stair, check to see
       // if we are at the threshold to kick off the fade for the next stair
-      if (i == stair_reached && stair_reached < NUM_STAIRS - 1 && stairAtThreshold(i))
+      if (i == stair_reached && stair_reached < NUM_STAIRS - 1 && stairAtThreshold(direction_based_stair))
       {
         stair_reached++;
         Serial.print("DEBUG: Starting to fade stair ");
-        Serial.println(stair_reached, DEC);
+        Serial.println(stairBasedOnDirection(stair_reached), DEC);
       }
 
       // If our current stair is done fading increment the number of stairs we've completed
-      if (doneFadingStair(i))
+      if (doneFadingStair(direction_based_stair))
       {
         Serial.print("DEBUG: Done fading stair ");
-        Serial.println(stairs_complete, DEC);
+        Serial.println(stairBasedOnDirection(stairs_complete), DEC);
         stairs_complete++;
       }
     }
-    delay(20);
+    // This delay effectively controls the speed of the fade
+    delay(FADE_STEP_DELAY_MS);
 
     pixels.show();
   }
@@ -208,7 +154,8 @@ bool doneFadingStair(uint8_t stair)
 {
   if (!stairValid(stair))
   {
-    Serial.println("ERROR doneFadingStair(): Attempted to access invalid stair!");
+    Serial.println("ERROR doneFadingStair(): Attempted to access invalid stair! Tried to access stair ");
+    Serial.println(stair, DEC);
     return false;
   }
 
@@ -226,7 +173,8 @@ bool stairAtThreshold(uint8_t stair)
 {
   if (!stairValid(stair))
   {
-    Serial.println("ERROR stairAtThreshold(): Attempted to access invalid stair!");
+    Serial.print("ERROR stairAtThreshold(): Attempted to access invalid stair! Tried to access stair ");
+    Serial.println(stair, DEC);
     return false;
   }
 
@@ -247,7 +195,8 @@ void tickStair(uint8_t stair)
 {
   if (!stairValid(stair))
   {
-    Serial.println("ERROR: Attempted to increment invalid stair!");
+    Serial.print("ERROR: Attempted to increment invalid stair! Tried to increment stair ");
+    Serial.println(stair, DEC);
     return;
   }
 
@@ -299,7 +248,7 @@ bool stairValid(uint8_t stair)
  * @brief Return the stair that should be fading based on the direction of the fade
  * @details If fading up the stairs, returns the given stair. If fading down the stairs returns the inverse stair on the list
  */
-uint8_t stair_based_on_direction(uint8_t stair)
+uint8_t stairBasedOnDirection(uint8_t stair)
 {
   if (fading_up_stairs)
   {
@@ -307,7 +256,14 @@ uint8_t stair_based_on_direction(uint8_t stair)
   }
   else
   {
-    NUM_STAIRS - stair;
+    int8_t inv_stair = stair - (NUM_STAIRS - 1);
+
+    if (inv_stair < 0)
+    {
+      inv_stair = -inv_stair;
+    }
+
+    return inv_stair;
   }
 }
 
@@ -322,7 +278,7 @@ void pollPIR()
 
 void allOn()
 {
-  uint32_t white = pixels.Color(255, 255, 255);
+  uint32_t white = pixels.Color(MAX_BRIGHTNESS, MAX_BRIGHTNESS, MAX_BRIGHTNESS);
   pixels.fill(white, 0, NUM_PIXELS);
   pixels.show();
 }
@@ -331,4 +287,67 @@ void allOff()
 {
   pixels.clear();
   pixels.show();
+}
+
+void demo()
+{
+  Serial.println("Send any character to start next fade (Fade up stairs, up brightness)");
+  while (Serial.available() == 0)
+  {
+    delay(100);
+  }; // Wait for input
+  while (Serial.available())
+  {
+    Serial.read();
+  } // Flush the serial RX buffer
+
+  fading_up_stairs = true;
+  fading_up_brightness = true;
+
+  startFade();
+
+  Serial.println("Send any character to start next fade (Fade up stairs, down brightness)");
+  while (Serial.available() == 0)
+  {
+    delay(100);
+  }; // Wait for input
+  while (Serial.available())
+  {
+    Serial.read();
+  } // Flush the serial RX buffer
+
+  fading_up_stairs = true;
+  fading_up_brightness = false;
+
+  startFade();
+
+  Serial.println("Send any character to start next fade (Fade down stairs, up brightness)");
+  while (Serial.available() == 0)
+  {
+    delay(100);
+  }; // Wait for input
+  while (Serial.available())
+  {
+    Serial.read();
+  } // Flush the serial RX buffer
+
+  fading_up_stairs = false;
+  fading_up_brightness = true;
+
+  startFade();
+
+  Serial.println("Send any character to start next fade (Fade down stairs, down brightness)");
+  while (Serial.available() == 0)
+  {
+    delay(100);
+  }; // Wait for input
+  while (Serial.available())
+  {
+    Serial.read();
+  } // Flush the serial RX buffer
+
+  fading_up_stairs = false;
+  fading_up_brightness = false;
+
+  startFade();
 }
