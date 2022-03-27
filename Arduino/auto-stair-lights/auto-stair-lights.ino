@@ -1,9 +1,10 @@
 #include <Adafruit_NeoPixel.h>
 
 // Pin defines
-#define NEOPXL_PIN 7     // Digital 7
-#define LOWER_PIR_PIN A0 // Analog 0
-#define UPPER_PIR_PIN A5 // Analog 5
+#define NEOPXL_PIN 7            // Digital 7
+#define LOWER_PIR_PIN A0        // Analog 0
+#define UPPER_PIR_PIN A5        // Analog 5
+#define COLOR_CHANGE_BUTTON_PIN // Analog 4
 
 /**
  * @brief Configurable Constants
@@ -32,27 +33,26 @@
 
 // Global variables
 Adafruit_NeoPixel pixels(NUM_PIXELS, NEOPXL_PIN, NEO_GRB + NEO_KHZ800);
-bool lower_pir_motion = false;
-bool upper_pir_motion = false;
-bool fading_down_stairs = true;
-bool fading_up_brightness = true;
-uint32_t stair_target_color[NUM_STAIRS];
-uint8_t stair_brightness[NUM_STAIRS];
+bool lower_pir_motion = false;           // True if there is motion on the lower PIR
+bool upper_pir_motion = false;           // True if there is motion on the upper PIR
+bool fading_down_stairs = true;          // True if fade is progressing down the stairs
+bool fading_up_brightness = true;        // True if fade is going up in brightness
+uint32_t stair_target_color[NUM_STAIRS]; // Stores the target stair colors
+uint8_t stair_brightness[NUM_STAIRS];    // Stores the current stair brightness
 
 void setup()
 {
   Serial.begin(9600);
   Serial.println("DEBUG: Initializing...");
-  // Initialize target color & brightness of 0
+
+  // Initialize target color white & brightness of 0
   for (uint8_t i = 0; i < NUM_STAIRS; i++)
   {
     stair_target_color[i] = pixels.Color(MAX_BRIGHTNESS, MAX_BRIGHTNESS, MAX_BRIGHTNESS);
     stair_brightness[i] = 0;
   }
-  //stair_target_color[0] = pixels.Color(MAX_BRIGHTNESS, 10, 10);
-  //stair_target_color[1] = pixels.Color(10, MAX_BRIGHTNESS, 10);
-  //stair_target_color[2] = pixels.Color(10, 10, MAX_BRIGHTNESS);
-  // Set all the pixels to off
+
+  //  Set all the pixels to off
   pixels.begin();
   pixels.show();
   Serial.println("DEBUG: Init complete!");
@@ -64,11 +64,17 @@ void loop()
 
   if (lower_pir_motion)
   {
+    // If there is motion at the bottom of the stairs, start a fade up in brightness going up
+    // the stairs
     fading_down_stairs = false;
     fading_up_brightness = true;
 
     startFade();
 
+    // Wait a bit for the stairs to be traversed
+    delay(5000);
+
+    // Wait for there to be no motion on both sensors
     while (lower_pir_motion || upper_pir_motion)
     {
       pollPIR();
@@ -83,18 +89,24 @@ void loop()
 
   if (upper_pir_motion)
   {
+    // If there is motion at the top of the stairs, start a fade up in brightness going down
+    // the stairs
     fading_down_stairs = true;
     fading_up_brightness = true;
 
     startFade();
 
+    // Wait a bit for the stairs to be traversed
+    delay(5000);
+
+    // Wait for there to be no motion on both sensors
     while (upper_pir_motion || lower_pir_motion)
     {
       pollPIR();
       delay(200);
     }
 
-    fading_down_stairs = true ;
+    fading_down_stairs = true;
     fading_up_brightness = false;
 
     startFade();
@@ -104,7 +116,7 @@ void loop()
 }
 
 /**
- * @brief Fades
+ * @brief Runs a fade based on the global fade parameters (fading_down_stairs, fading_up_brightness, etc.)
  */
 void startFade()
 {
@@ -150,6 +162,10 @@ void startFade()
   Serial.println("DEBUG: Fade complete!");
 }
 
+/**
+ * @brief Given a stair number, returns true if that stair is done fading (has reached it's MAX
+ * or MIN brightness depending on fading_up_brightness boolean)
+ */
 bool doneFadingStair(uint8_t stair)
 {
   if (!stairValid(stair))
@@ -169,6 +185,10 @@ bool doneFadingStair(uint8_t stair)
   }
 }
 
+/**
+ * @brief Given a stair number, returns true if that stair has hit its brightness threshold
+ * @details Uses fading_up_brightness boolean to test either the fade up or fade down thresholds
+ */
 bool stairAtThreshold(uint8_t stair)
 {
   if (!stairValid(stair))
@@ -276,6 +296,9 @@ void pollPIR()
   upper_pir_motion = (PIR_ADC_CUTOFF < analogRead(UPPER_PIR_PIN));
 }
 
+/**
+ * @brief Turn all pixels on to full white
+ */
 void allOn()
 {
   uint32_t white = pixels.Color(MAX_BRIGHTNESS, MAX_BRIGHTNESS, MAX_BRIGHTNESS);
@@ -283,12 +306,18 @@ void allOn()
   pixels.show();
 }
 
+/**
+ * @brief Turn all pixels off
+ */
 void allOff()
 {
   pixels.clear();
   pixels.show();
 }
 
+/**
+ * @brief demo function used to test stairs
+ */
 void demo()
 {
   Serial.println("Send any character to start next fade (Fade up stairs, up brightness)");
